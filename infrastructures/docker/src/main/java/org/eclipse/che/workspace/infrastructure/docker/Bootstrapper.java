@@ -150,6 +150,7 @@ public class Bootstrapper {
             throw new InfrastructureException("Bootstrapping of machine " + machineName + " reached timeout");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            // TODO CHE-5644
             throw new InfrastructureException("Bootstrapping of machine " + machineName + " was interrupted");
         } finally {
             this.eventService.unsubscribe(bootstrapperStatusListener, BootstrapperStatusEvent.class);

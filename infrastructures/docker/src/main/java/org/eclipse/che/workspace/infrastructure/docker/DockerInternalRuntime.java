@@ -13,7 +13,6 @@ package org.eclipse.che.workspace.infrastructure.docker;
 import com.google.inject.assistedinject.Assisted;
 
 import org.eclipse.che.api.core.NotFoundException;
-import org.eclipse.che.workspace.infrastructure.docker.snapshot.MachineSource;
 import org.eclipse.che.api.core.model.workspace.runtime.Machine;
 import org.eclipse.che.api.core.model.workspace.runtime.MachineStatus;
 import org.eclipse.che.api.core.model.workspace.runtime.RuntimeIdentity;
@@ -22,11 +21,11 @@ import org.eclipse.che.api.core.notification.EventService;
 import org.eclipse.che.api.workspace.server.DtoConverter;
 import org.eclipse.che.api.workspace.server.URLRewriter;
 import org.eclipse.che.api.workspace.server.model.impl.MachineImpl;
-import org.eclipse.che.workspace.infrastructure.docker.snapshot.MachineSourceImpl;
 import org.eclipse.che.api.workspace.server.spi.InfrastructureException;
 import org.eclipse.che.api.workspace.server.spi.InternalInfrastructureException;
 import org.eclipse.che.api.workspace.server.spi.InternalMachineConfig;
 import org.eclipse.che.api.workspace.server.spi.InternalRuntime;
+import org.eclipse.che.api.workspace.server.spi.RuntimeStartInterruptedException;
 import org.eclipse.che.api.workspace.shared.dto.event.MachineStatusEvent;
 import org.eclipse.che.api.workspace.shared.dto.event.RuntimeStatusEvent;
 import org.eclipse.che.api.workspace.shared.dto.event.ServerStatusEvent;
@@ -38,6 +37,8 @@ import org.eclipse.che.workspace.infrastructure.docker.model.DockerEnvironment;
 import org.eclipse.che.workspace.infrastructure.docker.monit.AbnormalMachineStopHandler;
 import org.eclipse.che.workspace.infrastructure.docker.server.ServerCheckerFactory;
 import org.eclipse.che.workspace.infrastructure.docker.server.ServersReadinessChecker;
+import org.eclipse.che.workspace.infrastructure.docker.snapshot.MachineSource;
+import org.eclipse.che.workspace.infrastructure.docker.snapshot.MachineSourceImpl;
 import org.eclipse.che.workspace.infrastructure.docker.snapshot.SnapshotDao;
 import org.eclipse.che.workspace.infrastructure.docker.snapshot.SnapshotException;
 import org.eclipse.che.workspace.infrastructure.docker.snapshot.SnapshotImpl;
@@ -52,6 +53,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 
 import static java.lang.String.format;
@@ -137,29 +139,37 @@ public class DockerInternalRuntime extends InternalRuntime<DockerRuntimeContext>
             }
         } catch (InfrastructureException | InterruptedException | RuntimeException e) {
             boolean interrupted = e instanceof InterruptedException || Thread.interrupted();
-            boolean runtimeDestroyingNeeded = !startSynchronizer.isStopCalled();
-            if (runtimeDestroyingNeeded) {
-                try {
-                    destroyRuntime(null);
-                } catch (Exception destExc) {
-                    LOG.error(destExc.getLocalizedMessage(), destExc);
-                }
+            try {
+                destroyRuntime(null);
+            } catch (Exception destExc) {
+                LOG.error(destExc.getLocalizedMessage(), destExc);
             }
             if (interrupted) {
-                throw new InfrastructureException("Docker runtime start was interrupted");
+                throw new RuntimeStartInterruptedException("Docker runtime start was interrupted");
             }
             if (e instanceof InfrastructureException) {
                 throw (InfrastructureException)e;
             } else {
                 throw new InternalInfrastructureException(e.getLocalizedMessage(), e);
             }
+        } finally {
+            startSynchronizer.release();
         }
     }
 
     @Override
     protected void internalStop(Map<String, String> stopOptions) throws InfrastructureException {
-        startSynchronizer.interruptStartThread();
-        destroyRuntime(stopOptions);
+        if (startSynchronizer.startThread != null) {
+            startSynchronizer.interruptStartThread();
+            try {
+                startSynchronizer.await();
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new InfrastructureException("Interrupted while waiting for start task cancellation", ex);
+            }
+        } else {
+            destroyRuntime(stopOptions);
+        }
     }
 
     @Override
@@ -442,10 +452,14 @@ public class DockerInternalRuntime extends InternalRuntime<DockerRuntimeContext>
         private Thread                     startThread;
         private boolean                    stopCalled;
         private Map<String, DockerMachine> machines;
+        private CountDownLatch             completionLatch;
+
+        private volatile Exception exception;
 
         public StartSynchronizer() {
             this.stopCalled = false;
             this.machines = new HashMap<>();
+            this.completionLatch = new CountDownLatch(1);
         }
 
         public synchronized Map<String, ? extends DockerMachine> getMachines() {
@@ -477,6 +491,11 @@ public class DockerInternalRuntime extends InternalRuntime<DockerRuntimeContext>
             startThread = Thread.currentThread();
         }
 
+        public synchronized void release() {
+            startThread = null;
+            completionLatch.countDown();
+        }
+
         public synchronized void interruptStartThread() throws InfrastructureException {
             if (startThread == null) {
                 throw new InternalInfrastructureException("Stop of non started context not allowed");
@@ -488,8 +507,17 @@ public class DockerInternalRuntime extends InternalRuntime<DockerRuntimeContext>
             startThread.interrupt();
         }
 
-        public synchronized boolean isStopCalled() {
-            return stopCalled;
+        public void await() throws InterruptedException, InfrastructureException {
+            completionLatch.await();
+            if (exception != null) {
+                try {
+                    throw exception;
+                } catch (InfrastructureException rethrow) {
+                    throw rethrow;
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }
         }
     }
 }

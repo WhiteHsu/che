@@ -268,7 +268,7 @@ public class WorkspaceRuntimes {
         if (state == null) {
             throw new NotFoundException("Workspace with id '" + workspaceId + "' is not running.");
         }
-        if (!state.status.equals(RUNNING)) {
+        if (!state.status.equals(RUNNING) && !state.status.equals(STARTING)) {
             throw new ConflictException(
                     format("Could not stop workspace '%s' because its state is '%s'", workspaceId, state.status));
         }
