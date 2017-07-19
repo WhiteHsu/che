@@ -21,6 +21,7 @@ import org.eclipse.che.api.core.notification.EventSubscriber;
 import org.eclipse.che.api.core.util.FileCleaner;
 import org.eclipse.che.api.workspace.server.spi.InfrastructureException;
 import org.eclipse.che.api.workspace.server.spi.InternalInfrastructureException;
+import org.eclipse.che.api.workspace.server.spi.RuntimeStartInterruptedException;
 import org.eclipse.che.api.workspace.shared.dto.RuntimeIdentityDto;
 import org.eclipse.che.api.workspace.shared.dto.event.BootstrapperStatusEvent;
 import org.eclipse.che.commons.lang.TarUtils;
@@ -149,9 +150,7 @@ public class Bootstrapper {
         } catch (TimeoutException e) {
             throw new InfrastructureException("Bootstrapping of machine " + machineName + " reached timeout");
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            // TODO CHE-5644
-            throw new InfrastructureException("Bootstrapping of machine " + machineName + " was interrupted");
+            throw new RuntimeStartInterruptedException(runtimeIdentity.getWorkspaceId());
         } finally {
             this.eventService.unsubscribe(bootstrapperStatusListener, BootstrapperStatusEvent.class);
         }

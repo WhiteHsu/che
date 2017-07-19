@@ -145,7 +145,7 @@ public class DockerInternalRuntime extends InternalRuntime<DockerRuntimeContext>
                 LOG.error(destExc.getLocalizedMessage(), destExc);
             }
             if (interrupted) {
-                throw new RuntimeStartInterruptedException("Docker runtime start was interrupted");
+                throw new RuntimeStartInterruptedException(identity.getWorkspaceId());
             }
             if (e instanceof InfrastructureException) {
                 throw (InfrastructureException)e;
