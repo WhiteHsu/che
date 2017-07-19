@@ -150,7 +150,7 @@ public class Bootstrapper {
         } catch (TimeoutException e) {
             throw new InfrastructureException("Bootstrapping of machine " + machineName + " reached timeout");
         } catch (InterruptedException e) {
-            throw new RuntimeStartInterruptedException(runtimeIdentity.getWorkspaceId());
+            throw new RuntimeStartInterruptedException(runtimeIdentity);
         } finally {
             this.eventService.unsubscribe(bootstrapperStatusListener, BootstrapperStatusEvent.class);
         }

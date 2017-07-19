@@ -10,12 +10,21 @@
  *******************************************************************************/
 package org.eclipse.che.api.workspace.server.spi;
 
+import org.eclipse.che.api.core.model.workspace.runtime.RuntimeIdentity;
+
+import static java.lang.String.format;
+
 /**
+ * Thrown when runtime start is interrupted.
+ *
  * @author Anton Korneta
  */
 public class RuntimeStartInterruptedException extends InfrastructureException {
 
-    public RuntimeStartInterruptedException(String workspaceId) {
-        super(String.format("Runtime start of the workspace '%s' is interrupted", workspaceId));
+    public RuntimeStartInterruptedException(RuntimeIdentity identity) {
+        super(format("Runtime start for identity 'workspace: %s, environment: %s, owner: %s' is interrupted",
+                     identity.getWorkspaceId(),
+                     identity.getEnvName(),
+                     identity.getOwner()));
     }
 }
